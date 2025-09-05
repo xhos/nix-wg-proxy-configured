@@ -6,8 +6,16 @@
   config = {
     homelab_ip = "10.100.0.2";
 
-    tcp_ports = [80 443 8081 25565 25];
-    udp_ports = [19132];
+    tcp_ports = [
+      80 # http
+      443 # https
+
+      25565 # minecraft
+      25 # smtp
+      2222 # ssh for minecraft
+    ];
+
+    udp_ports = [];
 
     wg_vps_addr_cidr = "10.100.0.1/24";
     wg_homelab_peer_ip = "10.100.0.2/32";
