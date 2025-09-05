@@ -4,25 +4,21 @@
   ...
 }: let
   config = {
-    # where to send forwarded traffic (your homelab wireguard ip)
     homelab_ip = "10.100.0.2";
 
-    # ports to publish to the internet and forward to homelab
     tcp_ports = [80 443 8081 25565 25];
     udp_ports = [19132];
 
-    # wireguard basics
     wg_vps_addr_cidr = "10.100.0.1/24";
     wg_homelab_peer_ip = "10.100.0.2/32";
     wg_listen_port = 55055;
-    wg_mtu = 1408; # comes from our pmtu probe
+    wg_mtu = 1408;
 
     wg_private_key_path = "/var/lib/wireguard/private.key";
-    wg_homelab_peer_pubkey = "your-public-homelab-key";
+    wg_homelab_peer_pubkey = "ZcKuazIamk0P+/VKTrelEvq2M12I1oZfuOROOuPdFDc=";
 
-    # ssh keys allowed for root
     ssh_authorized_keys = [
-      "your ssh public key"
+      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCfsYNHpOOrLtFd3rv8RPIl+WIDi3ePHBtffp6vmqWbY9NghnPXIUCLcuJiC845xLtOLAOLdSSn0MT2QqcPwesXfAZI5aBks2ojsNsPHB9ucoGrNRAln877RTju3iEMafUs2baSR9G8NBsy7FkitiLlRmoJlYYoLh0mPP+GB3eUldfDiXTORtRzXGfUSbLMam81WqhGn+8k+NLxmSZQEnd/HqNhlL7cy69yJqDCXcjUHbrttGqIZtoYzHq+p4GUqwBGTJmCM11PLOvtk1XlTAjZ1aAFna/A7tca9qTAIW1PJ9JSWbyIw10BXuDBY7UT565tTF8R/0zVZpu85dnH7zZn ssh-key-2025-09-03"
     ];
 
     host_name = "vps-proxy";
