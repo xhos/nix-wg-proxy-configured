@@ -11,10 +11,11 @@
       443 # https
 
       25565 # minecraft
-      25 # smtp
+
       2222 # ssh for minecraft
     ];
-
+    smtp_external_port = 25;
+    smtp_internal_port = 2525;
     udp_ports = [];
 
     wg_vps_addr_cidr = "10.100.0.1/24";
@@ -58,11 +59,13 @@ in {
       content = ''
         chain prerouting {
           type nat hook prerouting priority -100; policy accept;
+          tcp dport ${toString config.smtp_external_port} dnat to ${config.homelab_ip}:${toString config.smtp_internal_port}
           ${lib.optionalString have_tcp "tcp dport ${tcp_set} dnat to ${config.homelab_ip}"}
           ${lib.optionalString have_udp "udp dport ${udp_set} dnat to ${config.homelab_ip}"}
         }
         chain postrouting {
           type nat hook postrouting priority 100; policy accept;
+          oifname "wg0" ip daddr ${config.homelab_ip} tcp dport ${toString config.smtp_internal_port} masquerade
           ${lib.optionalString have_tcp "oifname \"wg0\" ip daddr ${config.homelab_ip} tcp dport ${tcp_set} masquerade"}
           ${lib.optionalString have_udp "oifname \"wg0\" ip daddr ${config.homelab_ip} udp dport ${udp_set} masquerade"}
         }
@@ -74,7 +77,7 @@ in {
   networking.firewall = {
     enable = true;
     trustedInterfaces = ["wg0"];
-    allowedTCPPorts = [22] ++ config.tcp_ports;
+    allowedTCPPorts = [22] ++ config.tcp_ports ++ [config.smtp_external_port];
     allowedUDPPorts = [config.wg_listen_port] ++ config.udp_ports;
   };
 
