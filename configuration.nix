@@ -15,10 +15,17 @@
       25565 # minecraft
 
       2222 # ssh for minecraft
+      2223 # ssh for amnezia vm
     ];
+
+    tcp_port_ranges = ["35000-35010"];
+
+    udp_ports = [];
+
+    udp_port_ranges = ["35000-35010"];
+
     smtp_external_port = 25;
     smtp_internal_port = 2525;
-    udp_ports = [];
 
     wg_vps_addr_cidr = "10.100.0.1/24";
     wg_homelab_peer_ip = "10.100.0.2/32";
@@ -40,6 +47,8 @@
   udp_set = "{ " + lib.concatStringsSep ", " (map toString config.udp_ports) + " }";
   have_tcp = config.tcp_ports != [];
   have_udp = config.udp_ports != [];
+  have_tcp_ranges = config.tcp_port_ranges != [];
+  have_udp_ranges = config.udp_port_ranges != [];
 in {
   # boot + basics
   boot.loader.systemd-boot.enable = true;
@@ -62,13 +71,17 @@ in {
           type nat hook prerouting priority -100; policy accept;
           tcp dport ${toString config.smtp_external_port} dnat to ${config.homelab_ip}:${toString config.smtp_internal_port}
           ${lib.optionalString have_tcp "tcp dport ${tcp_set} dnat to ${config.homelab_ip}"}
+          ${lib.optionalString have_tcp_ranges (lib.concatMapStringsSep "\n          " (range: "tcp dport ${range} dnat to ${config.homelab_ip}") config.tcp_port_ranges)}
           ${lib.optionalString have_udp "udp dport ${udp_set} dnat to ${config.homelab_ip}"}
+          ${lib.optionalString have_udp_ranges (lib.concatMapStringsSep "\n          " (range: "udp dport ${range} dnat to ${config.homelab_ip}") config.udp_port_ranges)}
         }
         chain postrouting {
           type nat hook postrouting priority 100; policy accept;
           oifname "wg0" ip daddr ${config.homelab_ip} tcp dport ${toString config.smtp_internal_port} masquerade
           ${lib.optionalString have_tcp "oifname \"wg0\" ip daddr ${config.homelab_ip} tcp dport ${tcp_set} masquerade"}
+          ${lib.optionalString have_tcp_ranges (lib.concatMapStringsSep "\n          " (range: "oifname \"wg0\" ip daddr ${config.homelab_ip} tcp dport ${range} masquerade") config.tcp_port_ranges)}
           ${lib.optionalString have_udp "oifname \"wg0\" ip daddr ${config.homelab_ip} udp dport ${udp_set} masquerade"}
+          ${lib.optionalString have_udp_ranges (lib.concatMapStringsSep "\n          " (range: "oifname \"wg0\" ip daddr ${config.homelab_ip} udp dport ${range} masquerade") config.udp_port_ranges)}
         }
       '';
     };
@@ -79,7 +92,15 @@ in {
     enable = true;
     trustedInterfaces = ["wg0"];
     allowedTCPPorts = [22] ++ config.tcp_ports ++ [config.smtp_external_port];
+    allowedTCPPortRanges = map (range: 
+      let parts = lib.splitString "-" range;
+      in { from = lib.toInt (builtins.elemAt parts 0); to = lib.toInt (builtins.elemAt parts 1); }
+    ) config.tcp_port_ranges;
     allowedUDPPorts = [config.wg_listen_port] ++ config.udp_ports;
+    allowedUDPPortRanges = map (range: 
+      let parts = lib.splitString "-" range;
+      in { from = lib.toInt (builtins.elemAt parts 0); to = lib.toInt (builtins.elemAt parts 1); }
+    ) config.udp_port_ranges;
   };
 
   # wireguard device
