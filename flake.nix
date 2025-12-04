@@ -1,27 +1,28 @@
 {
-  description = "VPS Proxy";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    disko = {
-      url = "github:nix-community/disko";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
+  outputs = {nixpkgs, ...}: let
+    systems = ["x86_64-linux" "aarch64-linux"];
+    forEachSystem = nixpkgs.lib.genAttrs systems;
 
-  outputs = {
-    nixpkgs,
-    disko,
-    ...
-  }: {
-    nixosConfigurations.vps-proxy = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        disko.nixosModules.disko
-        ./configuration.nix
-        ./hardware-configuration.nix # comment out if using nixos-anywhere
-        # ./disko.nix # un-comment if using nixos-anywhere
-      ];
+    commonConfig = import ./config.nix;
+
+    mkHost = hostName:
+      nixpkgs.lib.nixosSystem {
+        specialArgs = {
+          hostConfig = commonConfig // (import ./hosts/${hostName}/configuration.nix);
+        };
+        modules = [
+          ./proxy.nix
+          ./hosts/${hostName}/hardware-configuration.nix
+        ];
+      };
+  in {
+    formatter = forEachSystem (system: nixpkgs.legacyPackages.${system}.alejandra);
+
+    nixosConfigurations = {
+      proxy-1 = mkHost "proxy-1";
+      proxy-2 = mkHost "proxy-2";
     };
   };
 }

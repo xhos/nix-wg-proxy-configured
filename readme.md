@@ -1,77 +1,132 @@
 # nix-wg-proxy
 
-> [!TIP]
-> This repository is a template meant to be forked and adapted.
+declarative nixos flake for turning a vps into a wireguard reverse proxy to your homelab.
 
-This system flake turns a VPS into a **WireGuard endpoint and NAT gateway**.  
-All public traffic (HTTP, game ports, SMTP, etc.) terminates on the VPS, is DNAT-forwarded over the encrypted WireGuard tunnel to your homelab, and SNAT-masqueraded on return.  
-The VPS does not terminate TLS or run application services. Its sole role is to securely expose selected ports of the homelab to the internet.
+all traffic (http, game servers, smtp, whatever) terminates on the homelab after being forwarded over an encrypted wireguard tunnel. the vps never sees plaintext - it just routes packets.
 
-Fully declarative, takes about 10 minutes to set up.
+optionally includes caddy layer4 proxy to preserve client source ips for https traffic.
 
 ```mermaid
-flowchart LR
-  A[Client on Internet] -->|TCP/UDP request| B[VPS Public IP]
-  B -->|DNAT over WireGuard| C[Homelab Service]
-  C -->|Response| B
-  B -->|SNAT back to client| A
+flowchart TB
+  A[client] -->|HTTPS :443| B[VPS]
+  A -->|other ports| B
+  
+  B -->|caddy L4 prepends<br/>PROXY header| C[WireGuard tunnel]
+  B -->|nftables DNAT| C
+  
+  C --> D[homelab]
+  
+  D -->|:443 -> caddy<br/>real client IP preserved| E[web ervices]
+  D -->|other -> direct<br/>sees 10.100.0.1| F[SSH/games/etc]
+  
+  E --> C
+  F --> C
+  C -->|SNAT masquerade| B
+  B --> A
 ```
 
-## requirements
+> see the [blog post](https://xhos.dev/posts/nix-wg-proxy) for more details
 
-- A local computer or VM running NixOS (used to deploy)
-- A VPS that will be reimaged into NixOS (often starts as Ubuntu)
+## why
 
-## fork and adapt
+most isps block ports 80/443/25. even if they don't, exposing your home ip isn't great. this setup:
 
-Fork/clone this repo and edit [configuration.nix](./configuration.nix).
-Most importantly, replace the SSH public key with one that already has access to your VPS.
+- doesn't require dynamic dns
+- doesn't require port forwarding on your home router
+- keeps tls termination on your own hardware
+- works for any tcp/udp service, not just http
+- supports multiple vps proxies for redundancy
+- declarative and reproducible ❄️
 
-## deploy
+```plaintext
+.
+├── config.nix # shared config for all servers
+├── flake.nix # entrypoint
+├── hosts
+│   ├── proxy-1
+│   │   └── configuration.nix # host specific config
+│   └── proxy-2
+│       └── configuration.nix
+└── proxy.nix # main module
+```
 
-Covers both the initial NixOS install on a fresh VPS (often Ubuntu by default) and deployment of this flake.
-Tested so far only on Oracle free tier `VM.Standard.E2.1.Micro` with Ubuntu 24.04.
+## quick start
 
-> [!NOTE]
-> `your-server` is an SSH alias pointing to your VPS.
+### 1. get a vps
 
-### option 1: `nixos-infect` (for servers with less than 1GB RAM) (recommended, default)
+any provider works. 1 vcpu / 1gb ram is plenty. if they offer nixos, use it. otherwise pick ubuntu 22.04 or similar.
 
-Run from your local machine (VPS must already accept your SSH key):
+### 2. install nixos (if needed)
 
 ```bash
-ssh your-server 'curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect -o /tmp/nixos-infect && sudo NIX_CHANNEL=nixos-25.05 bash -x /tmp/nixos-infect'
+ssh your-vps 'curl -fsSL https://raw.githubusercontent.com/elitak/nixos-infect/master/nixos-infect -o /tmp/nixos-infect && sudo NIX_CHANNEL=nixos-25.05 bash -x /tmp/nixos-infect'
 ```
 
-The VPS will reboot into NixOS. Only the root user will exist, with the same SSH key access as before.
+### 3. prepare homelab wireguard
 
-You need to get the hardware config and add it to git
+add this to your homelab config (we'll fill in the vps pubkey later):
+
+```nix
+networking.wireguard.interfaces.wg0 = {
+  mtu = 1408;
+  ips = ["10.100.0.10/24"];
+  privateKeyFile = "/var/lib/wireguard/private.key";
+  generatePrivateKeyFile = true;
+  peers = [{
+    publicKey = ""; # fill after vps rebuild
+    endpoint = "VPS_PUBLIC_IP:55055";
+    allowedIPs = ["10.100.0.1/32"];
+    persistentKeepalive = 25;
+  }];
+};
+```
+
+apply it, then grab the homelab pubkey:
 
 ```bash
-ssh root@your-server 'nixos-generate-config --show-hardware-config' > ./hardware-configuration.nix
-git add hardware-configuration.nix
+sudo cat /var/lib/wireguard/private.key | wg pubkey
 ```
 
-Then you can rebuild to get the flake onto the server
+### 4. configure the flake
+
+clone this repo. edit `config.nix`, and `hosts/proxy-1/configuration.nix`
+
+### 5. get hardware config
 
 ```bash
-nixos-rebuild switch --flake .#vps-proxy --target-host root@proxy --install-bootloader
+ssh your-vps 'nixos-generate-config --show-hardware-config' > hosts/proxy-1/hardware-configuration.nix
 ```
 
-If you didn't see the banner with the WG public key, run the rebuild command again. You'll see something like:
-
-```txt
-=========================================
-VPS WireGuard public key:
-your-wg-key=
-Add this to your homelab configuration
-=========================================
-```
-
-### option 2: `nixos-anywhere` (> 1.5GB RAM VPS)
-
-Not tested here due to RAM limits, but in theory this works with the disko import enabled in flake.nix:
+### 6. deploy
 
 ```bash
-nix run github:nix-community/nixos-anywhere -- --flake .#vps-proxy your-server
+nixos-rebuild switch --flake .#proxy-1 --target-host your-vps --install-bootloader
 ```
+
+the rebuild will print the vps wireguard pubkey. add it to your homelab peer config and rebuild the homelab.
+
+## client ip preservation
+
+by default, all traffic appears to come from the wireguard tunnel ip (`10.100.0.1`). this breaks rate limiting, analytics, fail2ban, etc.
+
+set `enable_proxy_protocol = true` to run caddy with layer4 proxy protocol for https. your homelab reverse proxy must accept proxy protocol v2 on port 443.
+
+example caddy config on homelab:
+
+```caddyfile
+{
+  servers {
+    listener_wrappers {
+      proxy_protocol
+    }
+  }
+}
+```
+
+## multiple proxies
+
+1. add entry to `flake.nix`
+2. create `hosts/proxy-2/configuration.nix`
+3. deploy with `--flake .#proxy-2`
+
+useful for redundancy across providers, oracle has been known to randomly nuke free tier accounts. for configuring dns record fallback and healthchecks see the [blog post](https://xhos.dev/posts/nix-wg-proxy).
