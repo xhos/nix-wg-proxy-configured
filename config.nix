@@ -2,7 +2,6 @@
   homelab_wg_ip = "10.100.0.10";
 
   tcp_ports = [
-    1080 # proxy
     25565 # minecraft
     2222 # ssh for minecraft
     2223 # ssh for amnezia vm
@@ -12,9 +11,7 @@
 
   tcp_port_ranges = ["35000-35010"];
 
-  tcp_port_mappings = {
-    "25" = 2525; # VPS:25 -> homelab:2525
-  };
+  tcp_port_mappings = { "25" = 2525; };
 
   wg_mtu = 1408;
   wg_listen_port = 55055;
